@@ -1,12 +1,14 @@
 from mem0 import MemoryClient
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Literal
 import os
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
+# Memory categories for RL
+MemoryCategory = Literal["action", "reward", "state", "strategy"]
 
 class MemoryManager(BaseModel):
-    """Memory manager for handling persistent memory operations"""
+    """Memory manager for handling persistent memory operations with RL capabilities"""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -19,20 +21,54 @@ class MemoryManager(BaseModel):
 
     def __init__(self, user_id: str = "default_user", **kwargs):
         super().__init__(user_id=user_id, **kwargs)
-        # Initialize private attributes after Pydantic validation
         api_key = os.getenv("MEM0_API_KEY")
         self._client = MemoryClient(api_key=api_key)
 
-    def add_memory(self, data: str, metadata: Optional[Dict[str, Any]] = None) -> Dict:
-        """Add a new memory entry."""
+    def add_memory(
+        self, 
+        data: str, 
+        category: MemoryCategory,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict:
+        """Add a new memory entry with category."""
         try:
-            messages = [{"role": "assistant", "content": data}]
+            base_metadata = {
+                "session_id": self.session_id,
+                "category": category,
+                "timestamp": str(datetime.now())
+            }
+            
             if metadata:
-                messages[0]["metadata"] = {"session_id": self.session_id, **metadata}
+                base_metadata.update(metadata)
+                
+            messages = [{
+                "role": "assistant", 
+                "content": data,
+                "metadata": base_metadata
+            }]
+            
             return self._client.add(messages, user_id=self.user_id)
         except Exception as e:
             print(f"Error adding memory: {str(e)}")
             return {}
+
+    def add_reward_memory(
+        self,
+        reward: float,
+        action_id: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict:
+        """Add a reward memory tied to a specific action."""
+        reward_metadata = {
+            "reward_value": reward,
+            "action_id": action_id,
+            **(metadata or {})
+        }
+        return self.add_memory(
+            data=f"Reward {reward} received for action {action_id}",
+            category="reward",
+            metadata=reward_metadata
+        )
 
     def search_memories(self, query: str) -> List[Dict]:
         """Search for relevant memories using semantic search."""

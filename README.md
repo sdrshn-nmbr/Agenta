@@ -14,13 +14,13 @@ A command-line interface tool that uses reinforcement learning principles to acc
 
 1. Clone the repository
 
-2. Install dependencies:
+1. Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Copy `.env.template` to `.env` and add your OpenAI API key:
+1. Copy `.env.template` to `.env` and add your OpenAI API key:
 
 ```bash
 cp .env.template .env
@@ -56,9 +56,15 @@ python cli.py info
 
 The agent uses Q-learning to make decisions about which tools to use for a given objective. It maintains a Q-table that maps state-action pairs to expected rewards, learning from experience which actions are most effective in different situations.
 
-Key components:
+### TODO
 
-- Epsilon-greedy exploration (20% random actions by default)
-- Q-learning updates with configurable learning rate and discount factor
-- Integration with LangChain for LLM capabilities
-- Custom tools for various tasks
+- Code Docs RAG Search (for documentation)
+- Code Interpreter (for testing/running code)
+- Github Search (for code examples/solutions)
+- Directory RAG Search (for codebase navigation)
+- File Read/Write (for code manipulation)
+- Memory Manager (for storing and retrieving memories)
+- Reward Manager (for storing and retrieving rewards)
+- Q-Learning (for decision making)
+- Epsilon-Greedy Exploration (for exploration strategy)
+- LLM (for reasoning and decision making)

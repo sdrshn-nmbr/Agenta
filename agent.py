@@ -165,6 +165,25 @@ class ReflectiveAgent:
             # Extract results from the SearchResponse object
             if not search_response or not hasattr(search_response, 'results'):
                 console.print("[red]❌ No results in search response[/red]")
+                memory_result = self.memory_manager.add_memory(
+                    data="No search results found",
+                    category="action",
+                    metadata={
+                        "type": "search_failure",
+                        "query": query,
+                        "timestamp": str(datetime.now())
+                    }
+                )
+                if memory_result and "id" in memory_result:
+                    self.memory_manager.add_reward_memory(
+                        reward=-0.5,  # Penalize failed search
+                        action_id=memory_result["id"],
+                        metadata={
+                            "type": "search_reward",
+                            "query": query,
+                            "success": False
+                        }
+                    )
                 return "No search results found"
 
             results = search_response.results
@@ -175,6 +194,25 @@ class ReflectiveAgent:
             
             if not doc_ids:
                 console.print("[red]❌ No valid document IDs found[/red]")
+                memory_result = self.memory_manager.add_memory(
+                    data="No valid document IDs found",
+                    category="action",
+                    metadata={
+                        "type": "search_failure",
+                        "query": query,
+                        "timestamp": str(datetime.now())
+                    }
+                )
+                if memory_result and "id" in memory_result:
+                    self.memory_manager.add_reward_memory(
+                        reward=-0.3,  # Smaller penalty for partial failure
+                        action_id=memory_result["id"],
+                        metadata={
+                            "type": "search_reward",
+                            "query": query,
+                            "success": False
+                        }
+                    )
                 return "No valid document IDs found"
 
             # Get contents for the documents
@@ -195,17 +233,39 @@ class ReflectiveAgent:
             
             if not contents_response or not hasattr(contents_response, 'results'):
                 console.print("[red]❌ No content results[/red]")
+                memory_result = self.memory_manager.add_memory(
+                    data="No content could be retrieved",
+                    category="action",
+                    metadata={
+                        "type": "search_failure",
+                        "query": query,
+                        "timestamp": str(datetime.now())
+                    }
+                )
+                if memory_result and "id" in memory_result:
+                    self.memory_manager.add_reward_memory(
+                        reward=-0.3,  # Smaller penalty for partial failure
+                        action_id=memory_result["id"],
+                        metadata={
+                            "type": "search_reward",
+                            "query": query,
+                            "success": False
+                        }
+                    )
                 return "No content could be retrieved"
 
             # Process results
             summary = []
+            total_score = 0.0  # Initialize as float
             for result in contents_response.results:
                 title = getattr(result, 'title', 'No title')
                 url = getattr(result, 'url', '')
                 text = getattr(result, 'text', '')
                 highlights = getattr(result, 'highlights', [])
                 published_date = getattr(result, 'published_date', 'No date')
-                score = getattr(result, 'score', 0)
+                score = getattr(result, 'score', 0.0)  # Default to 0.0 if None
+                if score is not None:  # Only add if score is not None
+                    total_score += float(score)  # Convert to float to be safe
 
                 console.print(f"[dim]📄 Processing result:[/dim]")
                 console.print(f"[dim]   Title: {title[:100]}...[/dim]")
@@ -229,20 +289,101 @@ class ReflectiveAgent:
 
             if not summary:
                 console.print("[red]❌ No content could be extracted[/red]")
+                memory_result = self.memory_manager.add_memory(
+                    data="No relevant information could be extracted",
+                    category="action",
+                    metadata={
+                        "type": "search_failure",
+                        "query": query,
+                        "timestamp": str(datetime.now())
+                    }
+                )
+                if memory_result and "id" in memory_result:
+                    self.memory_manager.add_reward_memory(
+                        reward=-0.4,  # Penalty for extraction failure
+                        action_id=memory_result["id"],
+                        metadata={
+                            "type": "search_reward",
+                            "query": query,
+                            "success": False
+                        }
+                    )
                 return "No relevant information could be extracted"
 
-            return "\n".join(summary)
+            # Store search results in memory with reward based on quality
+            search_summary = "\n".join(summary)
+            memory_result = self.memory_manager.add_memory(
+                data=search_summary,
+                category="action",
+                metadata={
+                    "type": "search_result",
+                    "query": query,
+                    "num_results": len(results),
+                    "avg_score": total_score / len(results) if results else 0,
+                    "timestamp": str(datetime.now())
+                }
+            )
+            
+            # Add reward based on search quality
+            if memory_result and "id" in memory_result:
+                # Calculate reward based on number of results and average score
+                result_count_factor = min(len(results) / 5, 1.0)  # Max out at 5 results
+                avg_score = total_score / len(results) if results else 0
+                score_factor = min(avg_score / 0.7, 1.0)  # Normalize score, max at 0.7
+                reward = 0.5 + (0.25 * result_count_factor) + (0.25 * score_factor)
+                
+                self.memory_manager.add_reward_memory(
+                    reward=reward,
+                    action_id=memory_result["id"],
+                    metadata={
+                        "type": "search_reward",
+                        "query": query,
+                        "success": True,
+                        "num_results": len(results),
+                        "avg_score": avg_score
+                    }
+                )
+
+            return search_summary
 
         except Exception as e:
             console.print(f"[red]❌ Search error: {str(e)}[/red]")
             import traceback
             console.print(f"[red]Stack trace: {traceback.format_exc()}[/red]")
+            
+            # Store error in memory
+            memory_result = self.memory_manager.add_memory(
+                data=f"Search error: {str(e)}",
+                category="action",
+                metadata={
+                    "type": "search_error",
+                    "query": query,
+                    "error": str(e),
+                    "timestamp": str(datetime.now())
+                }
+            )
+            
+            # Add negative reward for error
+            if memory_result and "id" in memory_result:
+                self.memory_manager.add_reward_memory(
+                    reward=-0.5,  # Penalize errors
+                    action_id=memory_result["id"],
+                    metadata={
+                        "type": "search_reward",
+                        "query": query,
+                        "success": False,
+                        "error": str(e)
+                    }
+                )
+            
             return f"Search error: {str(e)}"
 
     def _smart_calculate(self, expression: str) -> str:
         """Enhanced calculator with unit handling."""
         try:
             numbers = re.findall(r"[-+]?\d*\.?\d+", expression)
+            result = None
+            
             if len(numbers) == 2:
                 num1, num2 = map(float, numbers)
                 if "divide" in expression.lower() or "/" in expression:
@@ -251,10 +392,61 @@ class ReflectiveAgent:
                     result = num1 * num2
                 else:
                     result = eval(expression)
-                return str(result)
-            return str(eval(expression))
+            else:
+                result = eval(expression)
+                
+            # Store calculation in memory
+            memory_result = self.memory_manager.add_memory(
+                data=f"Calculation: {expression} = {result}",
+                category="action",
+                metadata={
+                    "type": "calculation",
+                    "expression": expression,
+                    "result": result,
+                    "timestamp": str(datetime.now())
+                }
+            )
+            
+            # Add reward for successful calculation
+            if memory_result and "id" in memory_result:
+                self.memory_manager.add_reward_memory(
+                    reward=1.0,  # Reward successful calculation
+                    action_id=memory_result["id"],
+                    metadata={
+                        "type": "calculation_reward",
+                        "expression": expression,
+                        "success": True
+                    }
+                )
+            
+            return str(result)
         except Exception as e:
-            return f"Error in calculation: {str(e)}"
+            error_msg = f"Error in calculation: {str(e)}"
+            # Store error in memory
+            memory_result = self.memory_manager.add_memory(
+                data=error_msg,
+                category="action",
+                metadata={
+                    "type": "calculation_error",
+                    "expression": expression,
+                    "error": str(e),
+                    "timestamp": str(datetime.now())
+                }
+            )
+            
+            # Add negative reward for failed calculation
+            if memory_result and "id" in memory_result:
+                self.memory_manager.add_reward_memory(
+                    reward=-0.5,  # Penalize failed calculation
+                    action_id=memory_result["id"],
+                    metadata={
+                        "type": "calculation_reward",
+                        "expression": expression,
+                        "success": False
+                    }
+                )
+            
+            return error_msg
 
     def _reflect_on_actions(self, observations: List[Dict]) -> str:
         """Reflect on past actions and update strategy."""
@@ -277,16 +469,65 @@ class ReflectiveAgent:
                 agent=self.planner
             )
             
-            return self.crew.execute_task(reflection_task)
+            # Execute reflection
+            result = self.crew.execute_task(reflection_task)
+            
+            # Store reflection in memory
+            self.memory_manager.add_memory(
+                data=str(result),
+                category="strategy",
+                metadata={
+                    "type": "reflection",
+                    "observations": observations,
+                    "timestamp": str(datetime.now())
+                }
+            )
+            
+            return result
         except Exception as e:
-            return f"Reflection error: {str(e)}"
+            error_msg = f"Reflection error: {str(e)}"
+            self.memory_manager.add_memory(
+                data=error_msg,
+                category="strategy",
+                metadata={
+                    "type": "reflection_error",
+                    "error": str(e),
+                    "timestamp": str(datetime.now())
+                }
+            )
+            return error_msg
 
     def _format_result(self, text: str) -> str:
         """Format numbers and add proper units."""
         try:
             number = extract_number(text)
-            return format_currency(number)
+            result = format_currency(number)
+            
+            # Store formatting result
+            self.memory_manager.add_memory(
+                data=f"Formatted {text} to {result}",
+                category="action",
+                metadata={
+                    "type": "formatting",
+                    "input": text,
+                    "output": result,
+                    "timestamp": str(datetime.now())
+                }
+            )
+            
+            return result
         except Exception as e:
+            error_msg = f"Formatting error: {str(e)}"
+            self.memory_manager.add_memory(
+                data=error_msg,
+                category="action",
+                metadata={
+                    "type": "formatting_error",
+                    "input": text,
+                    "error": str(e),
+                    "timestamp": str(datetime.now())
+                }
+            )
             return text
 
     def _search_memory(self, query: str) -> str:
@@ -312,6 +553,7 @@ class ReflectiveAgent:
         try:
             result = self.memory_manager.add_memory(
                 data,
+                category="state",
                 metadata={
                     "type": "agent_memory",
                     "timestamp": str(datetime.now())
@@ -436,6 +678,7 @@ Objective: {state["messages"][-1].content}"""
             # Store the plan in memory
             self.memory_manager.add_memory(
                 f"Created plan: {steps}",
+                category="strategy",
                 metadata={"type": "plan", "step": "planning"}
             )
             
@@ -495,6 +738,7 @@ Return only the agent name."""
                 # Store result in memory
                 self.memory_manager.add_memory(
                     str(result),
+                    category="action",
                     metadata={
                         "step": current_step,
                         "agent": primary_agent.role,
@@ -523,6 +767,7 @@ Return only the agent name."""
                 
                 self.memory_manager.add_memory(
                     error_msg,
+                    category="action",
                     metadata={
                         "type": "error",
                         "step": current_step
@@ -556,6 +801,7 @@ Consider:
                 
                 self.memory_manager.add_memory(
                     reflection,
+                    category="strategy",
                     metadata={"type": "reflection"}
                 )
                 
