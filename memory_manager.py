@@ -1,25 +1,9 @@
 from mem0 import MemoryClient
-from typing import Dict, Any, Optional, List, Literal
+from typing import Dict, Any, Optional, List
 import os
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
-from enum import Enum
 
-class MemoryCategory(str, Enum):
-    ACTION = "action"
-    REWARD = "reward"
-    STATE = "state"
-    STRATEGY = "strategy"
-
-class MemoryMetadata(BaseModel):
-    """Enhanced metadata structure for memory entries"""
-    category: MemoryCategory
-    success_score: Optional[float] = Field(None, ge=0, le=1)
-    confidence: Optional[float] = Field(None, ge=0, le=1)
-    completion_time: Optional[float] = None  # in seconds
-    resource_usage: Optional[Dict[str, float]] = None
-    dependencies: Optional[List[str]] = None  # list of memory IDs
-    session_id: str
 
 class MemoryManager(BaseModel):
     """Memory manager for handling persistent memory operations"""
@@ -40,21 +24,11 @@ class MemoryManager(BaseModel):
         self._client = MemoryClient(api_key=api_key)
 
     def add_memory(self, data: str, metadata: Optional[Dict[str, Any]] = None) -> Dict:
-        """Add a new memory entry with enhanced metadata."""
+        """Add a new memory entry."""
         try:
-            base_metadata = {
-                "session_id": self.session_id,
-                "timestamp": datetime.now().isoformat(),
-            }
-            
+            messages = [{"role": "assistant", "content": data}]
             if metadata:
-                base_metadata.update(metadata)
-                
-            # Validate metadata if category is provided
-            if "category" in base_metadata:
-                MemoryMetadata(**base_metadata)
-                
-            messages = [{"role": "assistant", "content": data, "metadata": base_metadata}]
+                messages[0]["metadata"] = {"session_id": self.session_id, **metadata}
             return self._client.add(messages, user_id=self.user_id)
         except Exception as e:
             print(f"Error adding memory: {str(e)}")
