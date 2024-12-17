@@ -1,0 +1,1533 @@
+Get contents - Exa 
+
+[Exa home page![light logo](https://mintlify.s3.us-west-1.amazonaws.com/exa-52/logo/light.png)![dark logo](https://mintlify.s3.us-west-1.amazonaws.com/exa-52/logo/dark.png)](/)
+
+Search or ask...
+
+-   [API Dashboard](https://dashboard.exa.ai/login?redirect=/)
+-   [Exa Search](https://exa.ai/search)
+-   [
+    
+    API Dashboard
+    
+    ](https://dashboard.exa.ai/login?redirect=/)
+
+Search...
+
+Navigation
+
+API Reference
+
+Get contents
+
+[Documentation
+
+](/reference/getting-started)[Examples
+
+](/examples/demo-hallucination-detector)[Integrations
+
+](/integrations/python-sdk-specification)[Changelog
+
+](/changelog/auto-search-as-default)
+
+-   [
+    
+    Discord](https://discord.com/invite/HCShtBqbfV)
+-   [
+    
+    Blog](https://exa.ai/blog)
+
+##### Getting Started
+
+-   [
+    
+    Overview
+    
+    
+    
+    ](/reference/getting-started)
+-   [
+    
+    Quickstart with SDKs
+    
+    
+    
+    ](/reference/quickstart)
+
+##### API Reference
+
+-   [POST
+    
+    Search
+    
+    
+    
+    ](/reference/search)
+-   [POST
+    
+    Get contents
+    
+    
+    
+    ](/reference/get-contents)
+-   [POST
+    
+    Find similar links
+    
+    
+    
+    ](/reference/find-similar-links)
+
+##### RAG Quick Start Guide
+
+-   [
+    
+    RAG with Exa and OpenAI
+    
+    
+    
+    ](/reference/rag-quickstart)
+-   [
+    
+    RAG with LangChain
+    
+    
+    
+    ](/reference/langchain)
+-   [
+    
+    OpenAI Exa Wrapper
+    
+    
+    
+    ](/reference/openai)
+-   [
+    
+    CrewAI agents with Exa
+    
+    
+    
+    ](/reference/crewai)
+-   [
+    
+    RAG with LlamaIndex
+    
+    
+    
+    ](/reference/llamaindex)
+-   [
+    
+    Tool calling with GPT
+    
+    
+    
+    ](/reference/tool-calling-with-gpt4o)
+-   [
+    
+    Tool calling with Claude
+    
+    
+    
+    ](/reference/tool-calling-with-claude)
+
+##### Concepts
+
+-   [
+    
+    How Exa Search Works
+    
+    
+    
+    ](/reference/how-exa-search-works)
+-   [
+    
+    The Exa Index
+    
+    
+    
+    ](/reference/the-exa-index)
+-   [
+    
+    Prompting Guide
+    
+    
+    
+    ](/reference/prompting-guide)
+-   [
+    
+    Contents retrieval with Exa API
+    
+    
+    
+    ](/reference/contents-retrieval-with-exa-api)
+-   [
+    
+    Exa's Capabilities Explained
+    
+    
+    
+    ](/reference/exas-capabilities-explained)
+-   [
+    
+    FAQs
+    
+    
+    
+    ](/reference/faqs)
+-   [
+    
+    Crawling Subpages with Exa
+    
+    
+    
+    ](/reference/crawling-subpages-with-exa)
+-   [
+    
+    Exa LiveCrawl
+    
+    
+    
+    ](/reference/should-we-use-livecrawl)
+
+##### Admin
+
+-   [
+    
+    Setting Up and Managing Your Team
+    
+    
+    
+    ](/reference/setting-up-team)
+-   [
+    
+    Rate Limits
+    
+    
+    
+    ](/reference/rate-limits)
+-   [
+    
+    Enterprise Documentation & Security
+    
+    
+    
+    ](/reference/security)
+
+API Reference
+
+# Get contents
+
+Retrieve contents of documents based on a list of document IDs.
+
+`/contents` is used to *instantly* get content for documents, given the IDs of the documents.
+
+Also note that “instant” is a little bit of a lie if you are using keyword search, in which case contents might take a few seconds to retrieve.
+
+POST
+
+/
+
+contents
+
+Send
+
+Authorization
+
+x-api-key
+
+string
+
+\*
+
+x-api-key
+
+Required
+
+string
+
+Body
+
+object
+
+\*
+
+ids
+
+array
+
+\*
+
+ids
+
+Required
+
+array
+
+Array of document IDs obtained from searches
+
+text
+
+object
+
+text
+
+object
+
+Parsed contents of the page.
+
+maxCharacters
+
+integer
+
+maxCharacters
+
+integer
+
+Max length in characters for the text returned
+
+includeHtmlTags
+
+boolean
+
+Select option
+
+includeHtmlTags
+
+boolean
+
+Whether HTML tags, which can help the LLM understand structure of text, should be included. Default false
+
+highlights
+
+object
+
+highlights
+
+object
+
+Relevant extract(s) from the webpage.
+
+numSentences
+
+integer
+
+numSentences
+
+integer
+
+The number of sentences to be returned in each snippet. Default 5
+
+highlightsPerUrl
+
+integer
+
+highlightsPerUrl
+
+integer
+
+The number of snippets to return per page. Default 1
+
+query
+
+string
+
+query
+
+string
+
+summary
+
+object
+
+summary
+
+object
+
+Summary of the webpage
+
+query
+
+string
+
+query
+
+string
+
+If specified, tries to answer the query in the summary
+
+---
+
+[
+
+## Get your Exa API key
+
+
+
+
+
+](https://dashboard.exa.ai/api-keys)
+
+#### Authorizations
+
+[​
+
+](#authorization-x-api-key)
+
+x-api-key
+
+string
+
+headerrequired
+
+#### Body
+
+application/json
+
+[​
+
+](#body-ids)
+
+ids
+
+string\[\]
+
+required
+
+Array of document IDs obtained from searches
+
+[​
+
+](#body-text)
+
+text
+
+object
+
+Parsed contents of the page.
+
+Show child attributes
+
+[​
+
+](#body-text-max-characters)
+
+text.maxCharacters
+
+integer
+
+Max length in characters for the text returned
+
+[​
+
+](#body-text-include-html-tags)
+
+text.includeHtmlTags
+
+boolean
+
+Whether HTML tags, which can help the LLM understand structure of text, should be included. Default false
+
+[​
+
+](#body-highlights)
+
+highlights
+
+object
+
+Relevant extract(s) from the webpage.
+
+Show child attributes
+
+[​
+
+](#body-highlights-num-sentences)
+
+highlights.numSentences
+
+integer
+
+The number of sentences to be returned in each snippet. Default 5
+
+[​
+
+](#body-highlights-highlights-per-url)
+
+highlights.highlightsPerUrl
+
+integer
+
+The number of snippets to return per page. Default 1
+
+[​
+
+](#body-highlights-query)
+
+highlights.query
+
+string
+
+[​
+
+](#body-summary)
+
+summary
+
+object
+
+Summary of the webpage
+
+Show child attributes
+
+[​
+
+](#body-summary-query)
+
+summary.query
+
+string
+
+If specified, tries to answer the query in the summary
+
+#### Response
+
+200 - application/json
+
+[​
+
+](#response-results)
+
+results
+
+object\[\]
+
+Show child attributes
+
+[​
+
+](#response-results-title)
+
+results.title
+
+string
+
+The title of the search result.
+
+[​
+
+](#response-results-url)
+
+results.url
+
+string
+
+The URL of the search result.
+
+[​
+
+](#response-results-published-date)
+
+results.publishedDate
+
+string | null
+
+An estimate of the creation date, from parsing HTML content. Format is YYYY-MM-DD.
+
+[​
+
+](#response-results-author)
+
+results.author
+
+string | null
+
+If available, the author of the content.
+
+[​
+
+](#response-results-score)
+
+results.score
+
+number | null
+
+A number from 0 to 1 representing similarity between the query/url and the result.
+
+[​
+
+](#response-results-id)
+
+results.id
+
+string
+
+The temporary ID for the document. Useful for /contents endpoint.
+
+[​
+
+](#response-results-text)
+
+results.text
+
+string
+
+The full content text of the search result.
+
+[​
+
+](#response-results-highlights)
+
+results.highlights
+
+string\[\]
+
+Array of highlights extracted from the search result content.
+
+[​
+
+](#response-results-highlight-scores)
+
+results.highlightScores
+
+number\[\]
+
+Array of cosine similarity scores for each highlighted
+
+[​
+
+](#response-results-summary)
+
+results.summary
+
+string
+
+Summary of the webpage
+
+[Search](/reference/search)[Find similar links](/reference/find-similar-links)
+
+[x](https://twitter.com/exaailabs)[discord](https://discord.com/invite/HCShtBqbfV)
+
+[Powered by Mintlify](https://mintlify.com/preview-request?utm_campaign=poweredBy&utm_medium=docs&utm_source=docs.exa.ai)Search - Exa 
+
+[Exa home page![light logo](https://mintlify.s3.us-west-1.amazonaws.com/exa-52/logo/light.png)![dark logo](https://mintlify.s3.us-west-1.amazonaws.com/exa-52/logo/dark.png)](/)
+
+Search or ask...
+
+-   [API Dashboard](https://dashboard.exa.ai/login?redirect=/)
+-   [Exa Search](https://exa.ai/search)
+-   [
+    
+    API Dashboard
+    
+    ](https://dashboard.exa.ai/login?redirect=/)
+
+Search...
+
+Navigation
+
+API Reference
+
+Search
+
+[Documentation
+
+](/reference/getting-started)[Examples
+
+](/examples/demo-hallucination-detector)[Integrations
+
+](/integrations/python-sdk-specification)[Changelog
+
+](/changelog/auto-search-as-default)
+
+-   [
+    
+    Discord](https://discord.com/invite/HCShtBqbfV)
+-   [
+    
+    Blog](https://exa.ai/blog)
+
+##### Getting Started
+
+-   [
+    
+    Overview
+    
+    
+    
+    ](/reference/getting-started)
+-   [
+    
+    Quickstart with SDKs
+    
+    
+    
+    ](/reference/quickstart)
+
+##### API Reference
+
+-   [POST
+    
+    Search
+    
+    
+    
+    ](/reference/search)
+-   [POST
+    
+    Get contents
+    
+    
+    
+    ](/reference/get-contents)
+-   [POST
+    
+    Find similar links
+    
+    
+    
+    ](/reference/find-similar-links)
+
+##### RAG Quick Start Guide
+
+-   [
+    
+    RAG with Exa and OpenAI
+    
+    
+    
+    ](/reference/rag-quickstart)
+-   [
+    
+    RAG with LangChain
+    
+    
+    
+    ](/reference/langchain)
+-   [
+    
+    OpenAI Exa Wrapper
+    
+    
+    
+    ](/reference/openai)
+-   [
+    
+    CrewAI agents with Exa
+    
+    
+    
+    ](/reference/crewai)
+-   [
+    
+    RAG with LlamaIndex
+    
+    
+    
+    ](/reference/llamaindex)
+-   [
+    
+    Tool calling with GPT
+    
+    
+    
+    ](/reference/tool-calling-with-gpt4o)
+-   [
+    
+    Tool calling with Claude
+    
+    
+    
+    ](/reference/tool-calling-with-claude)
+
+##### Concepts
+
+-   [
+    
+    How Exa Search Works
+    
+    
+    
+    ](/reference/how-exa-search-works)
+-   [
+    
+    The Exa Index
+    
+    
+    
+    ](/reference/the-exa-index)
+-   [
+    
+    Prompting Guide
+    
+    
+    
+    ](/reference/prompting-guide)
+-   [
+    
+    Contents retrieval with Exa API
+    
+    
+    
+    ](/reference/contents-retrieval-with-exa-api)
+-   [
+    
+    Exa's Capabilities Explained
+    
+    
+    
+    ](/reference/exas-capabilities-explained)
+-   [
+    
+    FAQs
+    
+    
+    
+    ](/reference/faqs)
+-   [
+    
+    Crawling Subpages with Exa
+    
+    
+    
+    ](/reference/crawling-subpages-with-exa)
+-   [
+    
+    Exa LiveCrawl
+    
+    
+    
+    ](/reference/should-we-use-livecrawl)
+
+##### Admin
+
+-   [
+    
+    Setting Up and Managing Your Team
+    
+    
+    
+    ](/reference/setting-up-team)
+-   [
+    
+    Rate Limits
+    
+    
+    
+    ](/reference/rate-limits)
+-   [
+    
+    Enterprise Documentation & Security
+    
+    
+    
+    ](/reference/security)
+
+API Reference
+
+# Search
+
+Search the web with an Exa prompt-engineered query.
+
+`/search` returns a list of links relevant to your query and optionally get their full page contents.
+
+POST
+
+/
+
+search
+
+Send
+
+Authorization
+
+x-api-key
+
+string
+
+\*
+
+x-api-key
+
+Required
+
+string
+
+Body
+
+object
+
+\*
+
+query
+
+string
+
+\*
+
+query
+
+Required
+
+string
+
+The query string.
+
+Add Example Value
+
+useAutoprompt
+
+boolean
+
+Select option
+
+useAutoprompt
+
+boolean
+
+If true, your query will be converted to a Exa query. Default false. Neural or Auto search only.
+
+type
+
+string
+
+type
+
+string
+
+The Type of search, 'keyword', 'neural', or 'auto' (decides between keyword and neural). Default neural.
+
+category
+
+enum<string>
+
+Select option
+
+category
+
+enum<string>
+
+(beta) A data category to focus on, with higher comprehensivity and data cleanliness. Categories right now include company, research paper, news article, linkedin profile, github, tweet, movie, song, personal site, pdf and financial report.
+
+numResults
+
+integer
+
+numResults
+
+integer
+
+Number of search results to return. Default 10. Max 10 for basic plans. Up to thousands for custom plans.
+
+Add Example Value
+
+includeDomains
+
+array
+
+includeDomains
+
+array
+
+List of domains to include in the search. If specified, results will only come from these domains.
+
+Add Example Value
+
+excludeDomains
+
+array
+
+excludeDomains
+
+array
+
+List of domains to exclude in the search. If specified, results will not include any from these domains.
+
+Add Example Value
+
+startCrawlDate
+
+string
+
+startCrawlDate
+
+string
+
+Crawl date refers to the date that Exa discovered a link. Results will include links that were crawled after this date. Must be specified in ISO 8601 format.
+
+Add Example Value
+
+endCrawlDate
+
+string
+
+endCrawlDate
+
+string
+
+Crawl date refers to the date that Exa discovered a link. Results will include links that were crawled before this date. Must be specified in ISO 8601 format.
+
+Add Example Value
+
+startPublishedDate
+
+string
+
+startPublishedDate
+
+string
+
+Only links with a published date after this will be returned. Must be specified in ISO 8601 format.
+
+Add Example Value
+
+endPublishedDate
+
+string
+
+endPublishedDate
+
+string
+
+Only links with a published date before this will be returned. Must be specified in ISO 8601 format.
+
+Add Example Value
+
+includeText
+
+array
+
+includeText
+
+array
+
+List of strings that must be present in webpage text of results. Currently, only 1 string is supported, of up to 5 words.
+
+Add Example Value
+
+excludeText
+
+array
+
+excludeText
+
+array
+
+List of strings that must not be present in webpage text of results. Currently, only 1 string is supported, of up to 5 words.
+
+Add Example Value
+
+contents
+
+object
+
+contents
+
+object
+
+text
+
+object
+
+text
+
+object
+
+Parsed contents of the page.
+
+maxCharacters
+
+integer
+
+maxCharacters
+
+integer
+
+Max length in characters for the text returned
+
+includeHtmlTags
+
+boolean
+
+Select option
+
+includeHtmlTags
+
+boolean
+
+Whether HTML tags, which can help the LLM understand structure of text, should be included. Default false
+
+highlights
+
+object
+
+highlights
+
+object
+
+Relevant extract(s) from the webpage.
+
+numSentences
+
+integer
+
+numSentences
+
+integer
+
+The number of sentences to be returned in each snippet. Default 5
+
+highlightsPerUrl
+
+integer
+
+highlightsPerUrl
+
+integer
+
+The number of snippets to return per page. Default 1
+
+query
+
+string
+
+query
+
+string
+
+summary
+
+object
+
+summary
+
+object
+
+Summary of the webpage
+
+query
+
+string
+
+query
+
+string
+
+If specified, tries to answer the query in the summary
+
+[
+
+## Get your Exa API key
+
+
+
+
+
+](https://dashboard.exa.ai/api-keys)
+
+#### Authorizations
+
+[​
+
+](#authorization-x-api-key)
+
+x-api-key
+
+string
+
+headerrequired
+
+#### Body
+
+application/json
+
+[​
+
+](#body-query)
+
+query
+
+string
+
+required
+
+The query string.
+
+[​
+
+](#body-use-autoprompt)
+
+useAutoprompt
+
+boolean
+
+If true, your query will be converted to a Exa query. Default false. Neural or Auto search only.
+
+[​
+
+](#body-type)
+
+type
+
+string
+
+The Type of search, 'keyword', 'neural', or 'auto' (decides between keyword and neural). Default neural.
+
+[​
+
+](#body-category)
+
+category
+
+enum<string>
+
+(beta) A data category to focus on, with higher comprehensivity and data cleanliness. Categories right now include company, research paper, news article, linkedin profile, github, tweet, movie, song, personal site, pdf and financial report.
+
+Available options:
+
+`company`,
+
+`research paper`,
+
+`news`,
+
+`linkedin profile`,
+
+`github`,
+
+`tweet`,
+
+`movie`,
+
+`song`,
+
+`personal site`,
+
+`pdf`,
+
+`financial report`
+
+[​
+
+](#body-num-results)
+
+numResults
+
+integer
+
+Number of search results to return. Default 10. Max 10 for basic plans. Up to thousands for custom plans.
+
+[​
+
+](#body-include-domains)
+
+includeDomains
+
+string\[\]
+
+List of domains to include in the search. If specified, results will only come from these domains.
+
+[​
+
+](#body-exclude-domains)
+
+excludeDomains
+
+string\[\]
+
+List of domains to exclude in the search. If specified, results will not include any from these domains.
+
+[​
+
+](#body-start-crawl-date)
+
+startCrawlDate
+
+string
+
+Crawl date refers to the date that Exa discovered a link. Results will include links that were crawled after this date. Must be specified in ISO 8601 format.
+
+[​
+
+](#body-end-crawl-date)
+
+endCrawlDate
+
+string
+
+Crawl date refers to the date that Exa discovered a link. Results will include links that were crawled before this date. Must be specified in ISO 8601 format.
+
+[​
+
+](#body-start-published-date)
+
+startPublishedDate
+
+string
+
+Only links with a published date after this will be returned. Must be specified in ISO 8601 format.
+
+[​
+
+](#body-end-published-date)
+
+endPublishedDate
+
+string
+
+Only links with a published date before this will be returned. Must be specified in ISO 8601 format.
+
+[​
+
+](#body-include-text)
+
+includeText
+
+string\[\]
+
+List of strings that must be present in webpage text of results. Currently, only 1 string is supported, of up to 5 words.
+
+[​
+
+](#body-exclude-text)
+
+excludeText
+
+string\[\]
+
+List of strings that must not be present in webpage text of results. Currently, only 1 string is supported, of up to 5 words.
+
+[​
+
+](#body-contents)
+
+contents
+
+object
+
+Show child attributes
+
+[​
+
+](#body-contents-text)
+
+contents.text
+
+object
+
+Parsed contents of the page.
+
+Show child attributes
+
+[​
+
+](#body-contents-text-max-characters)
+
+contents.text.maxCharacters
+
+integer
+
+Max length in characters for the text returned
+
+[​
+
+](#body-contents-text-include-html-tags)
+
+contents.text.includeHtmlTags
+
+boolean
+
+Whether HTML tags, which can help the LLM understand structure of text, should be included. Default false
+
+[​
+
+](#body-contents-highlights)
+
+contents.highlights
+
+object
+
+Relevant extract(s) from the webpage.
+
+Show child attributes
+
+[​
+
+](#body-contents-highlights-num-sentences)
+
+contents.highlights.numSentences
+
+integer
+
+The number of sentences to be returned in each snippet. Default 5
+
+[​
+
+](#body-contents-highlights-highlights-per-url)
+
+contents.highlights.highlightsPerUrl
+
+integer
+
+The number of snippets to return per page. Default 1
+
+[​
+
+](#body-contents-highlights-query)
+
+contents.highlights.query
+
+string
+
+[​
+
+](#body-contents-summary)
+
+contents.summary
+
+object
+
+Summary of the webpage
+
+Show child attributes
+
+[​
+
+](#body-contents-summary-query)
+
+contents.summary.query
+
+string
+
+If specified, tries to answer the query in the summary
+
+#### Response
+
+200 - application/json
+
+[​
+
+](#response-results)
+
+results
+
+object\[\]
+
+A list of search results containing title, URL, published date, author, and score.
+
+Show child attributes
+
+[​
+
+](#response-results-title)
+
+results.title
+
+string
+
+The title of the search result.
+
+[​
+
+](#response-results-url)
+
+results.url
+
+string
+
+The URL of the search result.
+
+[​
+
+](#response-results-published-date)
+
+results.publishedDate
+
+string | null
+
+An estimate of the creation date, from parsing HTML content. Format is YYYY-MM-DD.
+
+[​
+
+](#response-results-author)
+
+results.author
+
+string | null
+
+If available, the author of the content.
+
+[​
+
+](#response-results-score)
+
+results.score
+
+number | null
+
+A number from 0 to 1 representing similarity between the query/url and the result.
+
+[​
+
+](#response-results-id)
+
+results.id
+
+string
+
+The temporary ID for the document. Useful for /contents endpoint.
+
+[​
+
+](#response-results-text)
+
+results.text
+
+string
+
+The full content text of the search result.
+
+[​
+
+](#response-results-highlights)
+
+results.highlights
+
+string\[\]
+
+Array of highlights extracted from the search result content.
+
+[​
+
+](#response-results-highlight-scores)
+
+results.highlightScores
+
+number\[\]
+
+Array of cosine similarity scores for each highlighted
+
+[​
+
+](#response-results-summary)
+
+results.summary
+
+string
+
+Summary of the webpage
+
+[​
+
+](#response-autoprompt-string)
+
+autopromptString
+
+string
+
+The Exa query created by the autoprompt functionality.
+
+[Quickstart with SDKs](/reference/quickstart)[Get contents](/reference/get-contents)
+
+[x](https://twitter.com/exaailabs)[discord](https://discord.com/invite/HCShtBqbfV)
+
+[Powered by Mintlify](https://mintlify.com/preview-request?utm_campaign=poweredBy&utm_medium=docs&utm_source=docs.exa.ai)
