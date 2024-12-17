@@ -449,22 +449,61 @@ class ReflectiveAgent:
             return error_msg
 
     def _reflect_on_actions(self, observations: List[Dict]) -> str:
-        """Reflect on past actions and update strategy."""
+        """Reflect on past actions and update strategy using reward history."""
         try:
-            # Get relevant memories for context
+            # Get relevant memories and reward history
             memories = self.memory_manager.get_session_memories()
-            memory_context = "\n".join([m.get("data", "") for m in memories])
             
-            # Create reflection task
+            # Separate memories by type for analysis
+            action_memories = [m for m in memories if m.get("metadata", {}).get("type", "").endswith("_reward")]
+            search_rewards = [m for m in action_memories if m["metadata"]["type"] == "search_reward"]
+            calc_rewards = [m for m in action_memories if m["metadata"]["type"] == "calculation_reward"]
+            
+            # Calculate success rates and average rewards
+            search_success = sum(1 for m in search_rewards if m["metadata"].get("success", False))
+            search_avg_reward = sum(float(m["metadata"].get("reward", 0)) for m in search_rewards) / len(search_rewards) if search_rewards else 0
+            
+            calc_success = sum(1 for m in calc_rewards if m["metadata"].get("success", False))
+            calc_avg_reward = sum(float(m["metadata"].get("reward", 0)) for m in calc_rewards) / len(calc_rewards) if calc_rewards else 0
+            
+            # Create performance summary
+            performance_summary = f"""
+            Performance Analysis:
+            Search Operations:
+            - Success Rate: {search_success}/{len(search_rewards) if search_rewards else 0}
+            - Average Reward: {search_avg_reward:.2f}
+            
+            Calculations:
+            - Success Rate: {calc_success}/{len(calc_rewards) if calc_rewards else 0}
+            - Average Reward: {calc_avg_reward:.2f}
+            """
+            
+            # Get general memory context
+            memory_context = "\n".join([m.get("data", "") for m in memories if not m.get("metadata", {}).get("type", "").endswith("_reward")])
+            
+            # Create reflection task with performance insights
             reflection_task = Task(
                 description=f"""
-                Review the following observations and provide insights:
+                Review the following:
+                
+                Observations:
                 {observations}
+                
+                {performance_summary}
                 
                 Context from memory:
                 {memory_context}
                 
-                Analyze the execution, success rate, and potential improvements.
+                Analyze:
+                1. Performance patterns in searches and calculations
+                2. Success rates and reward trends
+                3. Areas for improvement based on reward signals
+                4. Strategies to increase success rates
+                
+                Provide specific recommendations for:
+                - Search query optimization
+                - Calculation accuracy
+                - Error prevention
                 """,
                 agent=self.planner
             )
@@ -472,13 +511,17 @@ class ReflectiveAgent:
             # Execute reflection
             result = self.crew.execute_task(reflection_task)
             
-            # Store reflection in memory
+            # Store reflection with performance metrics
             self.memory_manager.add_memory(
-                data=str(result),
+                data=f"Performance Analysis:\n{performance_summary}\n\nReflection:\n{result}",
                 category="strategy",
                 metadata={
                     "type": "reflection",
                     "observations": observations,
+                    "search_success_rate": search_success/len(search_rewards) if search_rewards else 0,
+                    "calc_success_rate": calc_success/len(calc_rewards) if calc_rewards else 0,
+                    "search_avg_reward": search_avg_reward,
+                    "calc_avg_reward": calc_avg_reward,
                     "timestamp": str(datetime.now())
                 }
             )
