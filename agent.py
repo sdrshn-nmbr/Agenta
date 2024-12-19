@@ -106,6 +106,16 @@ class ReflectiveAgent:
             verbose=True
         )
         
+        # Track current state
+        self.current_state = {
+            "objective": "",
+            "step": 0,
+            "last_action": None,
+            "last_result": None,
+            "success_rate": 0.0,
+            "context": {}
+        }
+        
         # Initialize graph last since it depends on other components
         self.graph = self._build_graph()
 
@@ -690,6 +700,222 @@ For formatting:
             agent=agent,
             expected_output="Detailed results of the step execution"
         )
+
+    def _update_state(self, updates: Dict[str, Any]) -> None:
+        """Update current state with new information"""
+        self.current_state.update(updates)
+        
+        # Store state update in memory
+        self.memory_manager.add_memory(
+            data=f"State update: {updates}",
+            category="state",
+            metadata={"state": self.current_state}
+        )
+
+    def _record_experience(
+        self,
+        action: str,
+        result: Any,
+        reward: float,
+        next_state: Dict[str, Any]
+    ) -> None:
+        """Record an experience for learning"""
+        self.memory_manager.add_experience(
+            state=self.current_state,
+            action=action,
+            reward=reward,
+            next_state=next_state
+        )
+        
+        # Update success rate
+        total_experiences = len(self.memory_manager.get_recent_experiences())
+        if total_experiences > 0:
+            success_rate = sum(
+                1 for exp in self.memory_manager.get_recent_experiences()
+                if exp["reward"] > 0
+            ) / total_experiences
+            self._update_state({"success_rate": success_rate})
+
+    def _calculate_reward(self, result: Any) -> float:
+        """Calculate reward based on action result"""
+        if isinstance(result, dict) and "error" in result:
+            return -0.5  # Penalty for errors
+        
+        if isinstance(result, str):
+            if "error" in result.lower():
+                return -0.3
+            if "no results" in result.lower():
+                return -0.1
+            return 0.1  # Small positive reward for successful completion
+            
+        return 0.0  # Neutral reward for unclear results
+
+    def _select_agent(self, step: str) -> BaseCrewAgent:
+        """Select best agent for step using learned policies"""
+        state = {
+            **self.current_state,
+            "step_description": step
+        }
+        
+        # Try to get learned policy
+        policy = self.memory_manager.get_policy(state)
+        
+        if policy and policy["confidence"] > 0.3:
+            # Use policy to select agent
+            weights = policy["action_weights"]
+            agent_name = max(weights.items(), key=lambda x: x[1])[0]
+            return {
+                "researcher": self.researcher,
+                "calculator": self.calculator,
+                "formatter": self.formatter
+            }.get(agent_name, self.researcher)
+        
+        # Fallback to default selection
+        if "search" in step.lower() or "find" in step.lower():
+            return self.researcher
+        if "calculate" in step.lower() or "compute" in step.lower():
+            return self.calculator
+        if "format" in step.lower() or "present" in step.lower():
+            return self.formatter
+        
+        return self.researcher  # Default to researcher
+
+    async def execution_step(self, state: AgentState):
+        """Enhanced execution step with RL integration and performance tracking"""
+        plan = state.get("plan", [])
+        current_step = state.get("current_step", 0)
+
+        if not plan or current_step >= len(plan):
+            return {"messages": [AIMessage(content="Plan completed")]}
+
+        try:
+            step = plan[current_step]
+            step_start_time = datetime.now()
+            
+            # Update current state
+            self._update_state({
+                "step": current_step,
+                "objective": state["messages"][-1].content if state["messages"] else ""
+            })
+            
+            # Select agent using learned policies
+            selected_agent = self._select_agent(step)
+            
+            # Create and execute task
+            task = self._create_task_for_agent(step, selected_agent)
+            self.crew.tasks = [task]
+            result = self.crew.kickoff()
+            
+            # Calculate execution time and resource usage
+            execution_time = (datetime.now() - step_start_time).total_seconds()
+            resource_usage = {
+                "memory": len(str(state)) / 1024,  # Rough memory estimate in KB
+                "steps": current_step + 1,
+                "complexity": len(str(result)) / 1024  # Result complexity estimate
+            }
+            
+            # Track performance metrics
+            self.memory_manager.track_performance(
+                "execution_times",
+                execution_time,
+                {"step": current_step, "agent": selected_agent.role}
+            )
+            
+            self.memory_manager.track_performance(
+                "resource_usage",
+                sum(resource_usage.values()),
+                {"step": current_step, "details": resource_usage}
+            )
+            
+            # Calculate reward and record experience
+            reward = self._calculate_reward(result)
+            next_state = {
+                **self.current_state,
+                "step": current_step + 1,
+                "last_action": step,
+                "last_result": result
+            }
+            
+            # Record experience with performance data
+            self._record_experience(
+                action=selected_agent.role.lower(),
+                result=result,
+                reward=reward,
+                next_state=next_state
+            )
+            
+            # Update strategy performance
+            strategy_id = f"{selected_agent.role}_{current_step}"
+            self.memory_manager.update_strategy_performance(
+                strategy_id=strategy_id,
+                success=reward > 0,
+                execution_time=execution_time,
+                resource_usage=resource_usage
+            )
+            
+            # Track success rate
+            self.memory_manager.track_performance(
+                "success_rate",
+                1.0 if reward > 0 else 0.0,
+                {"step": current_step, "agent": selected_agent.role}
+            )
+            
+            # Track reward
+            self.memory_manager.track_performance(
+                "reward_history",
+                reward,
+                {"step": current_step, "agent": selected_agent.role}
+            )
+            
+            # Learn from recent experiences
+            if current_step > 0 and current_step % 3 == 0:  # Learn every 3 steps
+                self.memory_manager.learn_from_experiences()
+                # Also optimize strategies periodically
+                self.memory_manager.optimize_strategies()
+
+            return {
+                "observations": [{"action": step, "result": result}],
+                "current_step": current_step + 1,
+                "context": {
+                    **state.get("context", {}),
+                    f"step_{current_step}": result,
+                    "performance": self.memory_manager.get_performance_summary()
+                },
+                "result": str(result)
+            }
+
+        except Exception as e:
+            error_msg = f"Error in execution: {str(e)}"
+            print(f"Execution error details: {str(e)}")
+            
+            # Track error in performance metrics
+            self.memory_manager.track_performance(
+                "errors",
+                0.0,  # Zero score for errors
+                {
+                    "step": current_step,
+                    "error": str(e),
+                    "type": "execution_error"
+                }
+            )
+            
+            # Record error experience
+            self._record_experience(
+                action="error",
+                result=error_msg,
+                reward=-1.0,
+                next_state=self.current_state
+            )
+            
+            return {
+                "messages": [AIMessage(content=error_msg)],
+                "current_step": current_step + 1,
+                "context": {
+                    **state.get("context", {}),
+                    "error": error_msg,
+                    "performance": self.memory_manager.get_performance_summary()
+                }
+            }
 
     def _build_graph(self):
         workflow = StateGraph(AgentState)
