@@ -4,52 +4,75 @@ from rich.table import Table
 from rich.text import Text
 from rich.console import Group
 from rich.padding import Padding
+from typing import Any
 
 
-def format_plan(plan: list) -> Panel:
-    """Format plan steps in a nice panel."""
-    table = Table(show_header=False, show_edge=False, box=None, padding=(0, 2))
-    for i, step in enumerate(plan, 1):
-        # Convert potential markdown in steps to rich text
-        step_md = Markdown(step)
-        table.add_row(
-            Text(f"Step {i}", style="bold cyan"), 
-            Text("→", style="cyan"),
-            step_md
+def format_plan(plan: Any) -> Panel:
+    """Format a plan in a nice panel."""
+    if hasattr(plan, 'steps') and hasattr(plan, 'reasoning'):
+        # Handle structured plan
+        steps = plan.steps
+        reasoning = plan.reasoning
+        estimated_steps = getattr(plan, 'estimated_steps', len(steps))
+        
+        content = Group(
+            Text("📋 Plan Steps:", style="bold green"),
+            *(Text(f"  {i+1}. {step}", style="green") for i, step in enumerate(steps)),
+            Text("\n🤔 Reasoning:", style="bold blue"),
+            Text(reasoning, style="blue"),
+            Text(f"\n⏱️ Estimated Steps: {estimated_steps}", style="bold yellow")
         )
-    return Panel(
-        Padding(table, (1, 2)),
-        title="[bold cyan]🎯 Execution Plan[/bold cyan]",
-        border_style="cyan",
-        width=100,
-        subtitle="[dim cyan]Breaking down the objective into steps[/dim cyan]"
-    )
-
-
-def format_step_output(step: int, action: str, result: str) -> Panel:
-    """Format step output in a nice panel."""
-    # Truncate long results
-    max_result_length = 1000  # Increased for better markdown visibility
-    if len(result) > max_result_length:
-        result = result[:max_result_length] + "..."
+    else:
+        # Handle legacy plan format (list of steps)
+        if isinstance(plan, (list, tuple)):
+            steps = plan
+        else:
+            steps = [str(plan)]
+            
+        content = Group(
+            Text("📋 Plan:", style="bold green"),
+            *(Text(f"  {i+1}. {step}", style="green") for i, step in enumerate(steps))
+        )
     
-    content = Table(show_header=False, show_edge=False, box=None, padding=(0, 2))
-    content.add_row(
-        Text("🔍 Action", style="bold yellow"), 
-        Text("→", style="yellow"),
-        Markdown(action)  # Convert action to markdown
-    )
-    content.add_row(
-        Text("📝 Result", style="bold yellow"), 
-        Text("→", style="yellow"),
-        Markdown(result)  # Convert result to markdown
-    )
     return Panel(
         Padding(content, (1, 2)),
-        title=f"[bold yellow]⚡ Step {step} Execution[/bold yellow]",
-        border_style="yellow",
-        width=100,
-        subtitle="[dim yellow]Processing current step[/dim yellow]"
+        title="[bold green]🎯 Execution Plan[/bold green]",
+        border_style="green",
+        width=100
+    )
+
+
+def format_step_output(step_number: int, action: str, result: Any) -> Panel:
+    """Format a step output with action and result."""
+    if hasattr(result, 'content') and hasattr(result, 'success'):
+        # Handle structured output
+        content = result.content
+        success = result.success
+        is_final = getattr(result, 'is_final', False)
+        
+        if is_final:
+            return Panel(
+                Group(
+                    Text(f"Final Answer:", style="bold green" if success else "bold red"),
+                    Text(content)
+                ),
+                title="[bold]Final Result[/bold]",
+                border_style="green" if success else "red",
+                width=100
+            )
+    else:
+        content = str(result)
+    
+    return Panel(
+        Group(
+            Text(f"Step {step_number}:", style="bold blue"),
+            Text(f"Action: {action}", style="blue"),
+            Text("Result:", style="bold"),
+            Text(content)
+        ),
+        title="[bold]Step Output[/bold]",
+        border_style="blue",
+        width=100
     )
 
 

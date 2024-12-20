@@ -3,8 +3,6 @@ import operator
 import re
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain.agents import Tool
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END, START
 from pydantic import BaseModel, Field, ConfigDict
 from dotenv import load_dotenv
@@ -14,8 +12,15 @@ import os
 from formatting import format_plan, format_step_output, format_reflection
 from memory_manager import MemoryManager
 from datetime import datetime
-from crew_agents import PlannerAgent, ResearchAgent, CalculatorAgent, FormatterAgent, BaseCrewAgent
+from crew_agents import (
+    PlannerAgent,
+    ResearchAgent,
+    CalculatorAgent,
+    FormatterAgent,
+    BaseCrewAgent,
+)
 from crewai import Crew, Process, Task
+from openai import OpenAI
 
 load_dotenv()
 
@@ -23,19 +28,41 @@ load_dotenv()
 exa = Exa(os.getenv("EXA_API_KEY"))
 console = Console()
 
+# Initialize OpenAI client
+client = OpenAI()
+
 
 class Plan(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    
+    """Plan model for structured output"""
+
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        json_schema_extra={
+            "type": "object",
+            "required": ["steps", "reasoning", "estimated_steps"],
+            "additionalProperties": False,
+        },
+    )
+
     steps: List[str] = Field(description="Steps to follow in sequence")
     reasoning: str = Field(description="Reasoning behind the plan")
+    estimated_steps: int = Field(description="Estimated number of steps to complete")
 
 
 class Action(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    
-    tool_name: str
-    tool_input: str
+    """Action model for structured output"""
+
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        json_schema_extra={
+            "type": "object",
+            "required": ["tool_name", "tool_input", "thought"],
+            "additionalProperties": False,
+        },
+    )
+
+    tool_name: str = Field(description="Name of the tool to use")
+    tool_input: str = Field(description="Input for the tool")
     thought: str = Field(description="Reasoning for using this tool")
 
 
@@ -73,39 +100,37 @@ def format_currency(amount: float) -> str:
 class ReflectiveAgent:
     def __init__(self):
         # Initialize base components first
-        self.llm = ChatOpenAI(
-            temperature=float(os.getenv("AGENT_TEMPERATURE", 0.7)),
-            model="gpt-4o",
-        )
+        self.temperature = float(os.getenv("AGENT_TEMPERATURE", 0.7))
+        self.model = "gpt-4o-2024-08-06"  # Use gpt-4o model
         self.memory_manager = MemoryManager()
         self.tools = self._get_tools()
-        
+
         # Initialize CrewAI agents with tools
         self.planner = PlannerAgent(memory_manager=self.memory_manager)
         self.researcher = ResearchAgent(
-            memory_manager=self.memory_manager, 
+            memory_manager=self.memory_manager,
             search_tool=self.tools[0],  # search tool
-            tools=self.tools  # give access to all tools
+            tools=self.tools,  # give access to all tools
         )
         self.calculator = CalculatorAgent(
-            memory_manager=self.memory_manager, 
+            memory_manager=self.memory_manager,
             calculate_tool=self.tools[1],  # calculate tool
-            tools=self.tools  # give access to all tools
+            tools=self.tools,  # give access to all tools
         )
         self.formatter = FormatterAgent(
-            memory_manager=self.memory_manager, 
+            memory_manager=self.memory_manager,
             format_tool=self.tools[3],  # format tool
-            tools=self.tools  # give access to all tools
+            tools=self.tools,  # give access to all tools
         )
-        
+
         # Create CrewAI crew
         self.crew = Crew(
             agents=[self.planner, self.researcher, self.calculator, self.formatter],
             tasks=[],  # Tasks will be added dynamically
             process=Process.sequential,
-            verbose=True
+            verbose=True,
         )
-        
+
         # Track current state
         self.current_state = {
             "objective": "",
@@ -113,11 +138,61 @@ class ReflectiveAgent:
             "last_action": None,
             "last_result": None,
             "success_rate": 0.0,
-            "context": {}
+            "context": {},
         }
-        
+
         # Initialize graph last since it depends on other components
         self.graph = self._build_graph()
+
+    def _call_llm(
+        self, messages: List[Dict[str, str]], output_schema: Optional[BaseModel] = None
+    ) -> Union[str, BaseModel]:
+        """Helper method to call OpenAI API with optional structured output"""
+        try:
+            # Add JSON requirement to system message if using structured output
+            if output_schema and messages[0]["role"] == "system":
+                messages[0]["content"] = (
+                    messages[0]["content"][0]["text"]
+                    + "\nYou must respond in JSON format."
+                )
+
+            completion_params = {
+                "model": "gpt-4o-2024-08-06",
+                "messages": messages,
+                "temperature": self.temperature,
+            }
+
+            if output_schema:
+                # Get schema from Pydantic model and structure it correctly
+                schema = output_schema.model_json_schema()
+                completion_params["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": schema.get("title", "response"),
+                        "schema": schema,
+                        "strict": True
+                    }
+                }
+
+            completion = client.chat.completions.create(**completion_params)
+            result = completion.choices[0].message.content
+
+            if output_schema:
+                # Parse the JSON response into the Pydantic model
+                return output_schema.model_validate_json(result)
+
+            return result
+
+        except Exception as e:
+            console.print(f"[red]Error calling OpenAI API: {str(e)}[/red]")
+            raise e
+
+    def _format_messages(self, system: str, human: str) -> List[Dict[str, str]]:
+        """Helper method to format messages for OpenAI API"""
+        return [
+            {"role": "system", "content": [{"type": "text", "text": system}]},
+            {"role": "user", "content": [{"type": "text", "text": human}]},
+        ]
 
     def _get_tools(self) -> List[Tool]:
         return [
@@ -158,22 +233,22 @@ class ReflectiveAgent:
         try:
             # Log search query and parameters
             console.print(f"[dim]🔍 Search query: {query}[/dim]")
-            
+
             # Prepare search parameters according to docs
             search_params = {
                 "query": query,
                 "type": "neural",
                 "use_autoprompt": True,
                 "num_results": 10,
-                "start_published_date": "2018-01-01"
+                "start_published_date": "2018-01-01",
             }
             console.print(f"[dim]🔧 Search parameters: {search_params}[/dim]")
-            
+
             # Execute search
             search_response = exa.search(**search_params)
-            
+
             # Extract results from the SearchResponse object
-            if not search_response or not hasattr(search_response, 'results'):
+            if not search_response or not hasattr(search_response, "results"):
                 console.print("[red]❌ No results in search response[/red]")
                 memory_result = self.memory_manager.add_memory(
                     data="No search results found",
@@ -181,8 +256,8 @@ class ReflectiveAgent:
                     metadata={
                         "type": "search_failure",
                         "query": query,
-                        "timestamp": str(datetime.now())
-                    }
+                        "timestamp": str(datetime.now()),
+                    },
                 )
                 if memory_result and "id" in memory_result:
                     self.memory_manager.add_reward_memory(
@@ -191,8 +266,8 @@ class ReflectiveAgent:
                         metadata={
                             "type": "search_reward",
                             "query": query,
-                            "success": False
-                        }
+                            "success": False,
+                        },
                     )
                 return "No search results found"
 
@@ -200,8 +275,8 @@ class ReflectiveAgent:
             console.print(f"[dim]📊 Found {len(results)} results[/dim]")
 
             # Get document IDs for content retrieval
-            doc_ids = [result.id for result in results if hasattr(result, 'id')]
-            
+            doc_ids = [result.id for result in results if hasattr(result, "id")]
+
             if not doc_ids:
                 console.print("[red]❌ No valid document IDs found[/red]")
                 memory_result = self.memory_manager.add_memory(
@@ -210,8 +285,8 @@ class ReflectiveAgent:
                     metadata={
                         "type": "search_failure",
                         "query": query,
-                        "timestamp": str(datetime.now())
-                    }
+                        "timestamp": str(datetime.now()),
+                    },
                 )
                 if memory_result and "id" in memory_result:
                     self.memory_manager.add_reward_memory(
@@ -220,28 +295,25 @@ class ReflectiveAgent:
                         metadata={
                             "type": "search_reward",
                             "query": query,
-                            "success": False
-                        }
+                            "success": False,
+                        },
                     )
                 return "No valid document IDs found"
 
             # Get contents for the documents
             contents_params = {
                 "ids": doc_ids,
-                "text": {
-                    "max_characters": 3000,
-                    "include_html_tags": False
-                },
+                "text": {"max_characters": 3000, "include_html_tags": False},
                 "highlights": {
                     "num_sentences": 5,
                     "highlights_per_url": 3,
-                    "query": query
-                }
+                    "query": query,
+                },
             }
-            
+
             contents_response = exa.get_contents(**contents_params)
-            
-            if not contents_response or not hasattr(contents_response, 'results'):
+
+            if not contents_response or not hasattr(contents_response, "results"):
                 console.print("[red]❌ No content results[/red]")
                 memory_result = self.memory_manager.add_memory(
                     data="No content could be retrieved",
@@ -249,8 +321,8 @@ class ReflectiveAgent:
                     metadata={
                         "type": "search_failure",
                         "query": query,
-                        "timestamp": str(datetime.now())
-                    }
+                        "timestamp": str(datetime.now()),
+                    },
                 )
                 if memory_result and "id" in memory_result:
                     self.memory_manager.add_reward_memory(
@@ -259,8 +331,8 @@ class ReflectiveAgent:
                         metadata={
                             "type": "search_reward",
                             "query": query,
-                            "success": False
-                        }
+                            "success": False,
+                        },
                     )
                 return "No content could be retrieved"
 
@@ -268,12 +340,12 @@ class ReflectiveAgent:
             summary = []
             total_score = 0.0  # Initialize as float
             for result in contents_response.results:
-                title = getattr(result, 'title', 'No title')
-                url = getattr(result, 'url', '')
-                text = getattr(result, 'text', '')
-                highlights = getattr(result, 'highlights', [])
-                published_date = getattr(result, 'published_date', 'No date')
-                score = getattr(result, 'score', 0.0)  # Default to 0.0 if None
+                title = getattr(result, "title", "No title")
+                url = getattr(result, "url", "")
+                text = getattr(result, "text", "")
+                highlights = getattr(result, "highlights", [])
+                published_date = getattr(result, "published_date", "No date")
+                score = getattr(result, "score", 0.0)  # Default to 0.0 if None
                 if score is not None:  # Only add if score is not None
                     total_score += float(score)  # Convert to float to be safe
 
@@ -294,7 +366,7 @@ class ReflectiveAgent:
                     summary.append("Key highlights:")
                     for highlight in highlights:
                         summary.append(f"- {highlight}")
-                
+
                 summary.append("")
 
             if not summary:
@@ -305,8 +377,8 @@ class ReflectiveAgent:
                     metadata={
                         "type": "search_failure",
                         "query": query,
-                        "timestamp": str(datetime.now())
-                    }
+                        "timestamp": str(datetime.now()),
+                    },
                 )
                 if memory_result and "id" in memory_result:
                     self.memory_manager.add_reward_memory(
@@ -315,8 +387,8 @@ class ReflectiveAgent:
                         metadata={
                             "type": "search_reward",
                             "query": query,
-                            "success": False
-                        }
+                            "success": False,
+                        },
                     )
                 return "No relevant information could be extracted"
 
@@ -330,10 +402,10 @@ class ReflectiveAgent:
                     "query": query,
                     "num_results": len(results),
                     "avg_score": total_score / len(results) if results else 0,
-                    "timestamp": str(datetime.now())
-                }
+                    "timestamp": str(datetime.now()),
+                },
             )
-            
+
             # Add reward based on search quality
             if memory_result and "id" in memory_result:
                 # Calculate reward based on number of results and average score
@@ -341,7 +413,7 @@ class ReflectiveAgent:
                 avg_score = total_score / len(results) if results else 0
                 score_factor = min(avg_score / 0.7, 1.0)  # Normalize score, max at 0.7
                 reward = 0.5 + (0.25 * result_count_factor) + (0.25 * score_factor)
-                
+
                 self.memory_manager.add_reward_memory(
                     reward=reward,
                     action_id=memory_result["id"],
@@ -350,17 +422,18 @@ class ReflectiveAgent:
                         "query": query,
                         "success": True,
                         "num_results": len(results),
-                        "avg_score": avg_score
-                    }
+                        "avg_score": avg_score,
+                    },
                 )
 
             return search_summary
 
         except Exception as e:
-            console.print(f"[red]❌ Search error: {str(e)}[/red]")
+            console.print(f"[red] Search error: {str(e)}[/red]")
             import traceback
+
             console.print(f"[red]Stack trace: {traceback.format_exc()}[/red]")
-            
+
             # Store error in memory
             memory_result = self.memory_manager.add_memory(
                 data=f"Search error: {str(e)}",
@@ -369,10 +442,10 @@ class ReflectiveAgent:
                     "type": "search_error",
                     "query": query,
                     "error": str(e),
-                    "timestamp": str(datetime.now())
-                }
+                    "timestamp": str(datetime.now()),
+                },
             )
-            
+
             # Add negative reward for error
             if memory_result and "id" in memory_result:
                 self.memory_manager.add_reward_memory(
@@ -382,10 +455,10 @@ class ReflectiveAgent:
                         "type": "search_reward",
                         "query": query,
                         "success": False,
-                        "error": str(e)
-                    }
+                        "error": str(e),
+                    },
                 )
-            
+
             return f"Search error: {str(e)}"
 
     def _smart_calculate(self, expression: str) -> str:
@@ -393,7 +466,7 @@ class ReflectiveAgent:
         try:
             numbers = re.findall(r"[-+]?\d*\.?\d+", expression)
             result = None
-            
+
             if len(numbers) == 2:
                 num1, num2 = map(float, numbers)
                 if "divide" in expression.lower() or "/" in expression:
@@ -404,7 +477,7 @@ class ReflectiveAgent:
                     result = eval(expression)
             else:
                 result = eval(expression)
-                
+
             # Store calculation in memory
             memory_result = self.memory_manager.add_memory(
                 data=f"Calculation: {expression} = {result}",
@@ -413,10 +486,10 @@ class ReflectiveAgent:
                     "type": "calculation",
                     "expression": expression,
                     "result": result,
-                    "timestamp": str(datetime.now())
-                }
+                    "timestamp": str(datetime.now()),
+                },
             )
-            
+
             # Add reward for successful calculation
             if memory_result and "id" in memory_result:
                 self.memory_manager.add_reward_memory(
@@ -425,10 +498,10 @@ class ReflectiveAgent:
                     metadata={
                         "type": "calculation_reward",
                         "expression": expression,
-                        "success": True
-                    }
+                        "success": True,
+                    },
                 )
-            
+
             return str(result)
         except Exception as e:
             error_msg = f"Error in calculation: {str(e)}"
@@ -440,10 +513,10 @@ class ReflectiveAgent:
                     "type": "calculation_error",
                     "expression": expression,
                     "error": str(e),
-                    "timestamp": str(datetime.now())
-                }
+                    "timestamp": str(datetime.now()),
+                },
             )
-            
+
             # Add negative reward for failed calculation
             if memory_result and "id" in memory_result:
                 self.memory_manager.add_reward_memory(
@@ -452,10 +525,10 @@ class ReflectiveAgent:
                     metadata={
                         "type": "calculation_reward",
                         "expression": expression,
-                        "success": False
-                    }
+                        "success": False,
+                    },
                 )
-            
+
             return error_msg
 
     def _reflect_on_actions(self, observations: List[Dict]) -> str:
@@ -463,19 +536,43 @@ class ReflectiveAgent:
         try:
             # Get relevant memories and reward history
             memories = self.memory_manager.get_session_memories()
-            
+
             # Separate memories by type for analysis
-            action_memories = [m for m in memories if m.get("metadata", {}).get("type", "").endswith("_reward")]
-            search_rewards = [m for m in action_memories if m["metadata"]["type"] == "search_reward"]
-            calc_rewards = [m for m in action_memories if m["metadata"]["type"] == "calculation_reward"]
-            
+            action_memories = [
+                m
+                for m in memories
+                if m.get("metadata", {}).get("type", "").endswith("_reward")
+            ]
+            search_rewards = [
+                m for m in action_memories if m["metadata"]["type"] == "search_reward"
+            ]
+            calc_rewards = [
+                m
+                for m in action_memories
+                if m["metadata"]["type"] == "calculation_reward"
+            ]
+
             # Calculate success rates and average rewards
-            search_success = sum(1 for m in search_rewards if m["metadata"].get("success", False))
-            search_avg_reward = sum(float(m["metadata"].get("reward", 0)) for m in search_rewards) / len(search_rewards) if search_rewards else 0
-            
-            calc_success = sum(1 for m in calc_rewards if m["metadata"].get("success", False))
-            calc_avg_reward = sum(float(m["metadata"].get("reward", 0)) for m in calc_rewards) / len(calc_rewards) if calc_rewards else 0
-            
+            search_success = sum(
+                1 for m in search_rewards if m["metadata"].get("success", False)
+            )
+            search_avg_reward = (
+                sum(float(m["metadata"].get("reward", 0)) for m in search_rewards)
+                / len(search_rewards)
+                if search_rewards
+                else 0
+            )
+
+            calc_success = sum(
+                1 for m in calc_rewards if m["metadata"].get("success", False)
+            )
+            calc_avg_reward = (
+                sum(float(m["metadata"].get("reward", 0)) for m in calc_rewards)
+                / len(calc_rewards)
+                if calc_rewards
+                else 0
+            )
+
             # Create performance summary
             performance_summary = f"""
             Performance Analysis:
@@ -487,10 +584,16 @@ class ReflectiveAgent:
             - Success Rate: {calc_success}/{len(calc_rewards) if calc_rewards else 0}
             - Average Reward: {calc_avg_reward:.2f}
             """
-            
+
             # Get general memory context
-            memory_context = "\n".join([m.get("data", "") for m in memories if not m.get("metadata", {}).get("type", "").endswith("_reward")])
-            
+            memory_context = "\n".join(
+                [
+                    m.get("data", "")
+                    for m in memories
+                    if not m.get("metadata", {}).get("type", "").endswith("_reward")
+                ]
+            )
+
             # Create reflection task with performance insights
             reflection_task = Task(
                 description=f"""
@@ -515,12 +618,12 @@ class ReflectiveAgent:
                 - Calculation accuracy
                 - Error prevention
                 """,
-                agent=self.planner
+                agent=self.planner,
             )
-            
+
             # Execute reflection
             result = self.crew.execute_task(reflection_task)
-            
+
             # Store reflection with performance metrics
             self.memory_manager.add_memory(
                 data=f"Performance Analysis:\n{performance_summary}\n\nReflection:\n{result}",
@@ -528,14 +631,18 @@ class ReflectiveAgent:
                 metadata={
                     "type": "reflection",
                     "observations": observations,
-                    "search_success_rate": search_success/len(search_rewards) if search_rewards else 0,
-                    "calc_success_rate": calc_success/len(calc_rewards) if calc_rewards else 0,
+                    "search_success_rate": (
+                        search_success / len(search_rewards) if search_rewards else 0
+                    ),
+                    "calc_success_rate": (
+                        calc_success / len(calc_rewards) if calc_rewards else 0
+                    ),
                     "search_avg_reward": search_avg_reward,
                     "calc_avg_reward": calc_avg_reward,
-                    "timestamp": str(datetime.now())
-                }
+                    "timestamp": str(datetime.now()),
+                },
             )
-            
+
             return result
         except Exception as e:
             error_msg = f"Reflection error: {str(e)}"
@@ -545,8 +652,8 @@ class ReflectiveAgent:
                 metadata={
                     "type": "reflection_error",
                     "error": str(e),
-                    "timestamp": str(datetime.now())
-                }
+                    "timestamp": str(datetime.now()),
+                },
             )
             return error_msg
 
@@ -555,7 +662,7 @@ class ReflectiveAgent:
         try:
             number = extract_number(text)
             result = format_currency(number)
-            
+
             # Store formatting result
             self.memory_manager.add_memory(
                 data=f"Formatted {text} to {result}",
@@ -564,10 +671,10 @@ class ReflectiveAgent:
                     "type": "formatting",
                     "input": text,
                     "output": result,
-                    "timestamp": str(datetime.now())
-                }
+                    "timestamp": str(datetime.now()),
+                },
             )
-            
+
             return result
         except Exception as e:
             error_msg = f"Formatting error: {str(e)}"
@@ -578,8 +685,8 @@ class ReflectiveAgent:
                     "type": "formatting_error",
                     "input": text,
                     "error": str(e),
-                    "timestamp": str(datetime.now())
-                }
+                    "timestamp": str(datetime.now()),
+                },
             )
             return text
 
@@ -589,14 +696,14 @@ class ReflectiveAgent:
             memories = self.memory_manager.search_memories(query)
             if not memories:
                 return "No relevant memories found"
-            
+
             memory_text = []
             for mem in memories[:3]:
                 memory_text.append(f"Memory: {mem.get('data', '')}")
-                if metadata := mem.get('metadata', {}):
+                if metadata := mem.get("metadata", {}):
                     memory_text.append(f"Context: {metadata}")
                 memory_text.append("")
-            
+
             return "\n".join(memory_text)
         except Exception as e:
             return f"Memory search error: {str(e)}"
@@ -607,21 +714,14 @@ class ReflectiveAgent:
             result = self.memory_manager.add_memory(
                 data,
                 category="state",
-                metadata={
-                    "type": "agent_memory",
-                    "timestamp": str(datetime.now())
-                }
+                metadata={"type": "agent_memory", "timestamp": str(datetime.now())},
             )
             return f"Memory added successfully: {result.get('id', 'unknown')}"
         except Exception as e:
             return f"Failed to add memory: {str(e)}"
 
     def _create_planner(self):
-        planner_prompt = ChatPromptTemplate.from_messages(
-            [
-                (
-                    "system",
-                    """Create a detailed plan to accomplish the objective.
+        system_prompt = """Create a detailed plan to accomplish the objective.
 Consider:
 1. What specific information needs to be searched
 2. What calculations are needed
@@ -636,20 +736,22 @@ For simple calculations:
 For complex tasks:
 - Break down into logical steps
 - Include verification steps
-- Consider data dependencies""",
-                ),
-                ("human", "{objective}"),
-            ]
-        )
+- Consider data dependencies
 
-        return planner_prompt | self.llm.with_structured_output(Plan)
+Return a JSON object with:
+{
+    "steps": ["step1", "step2", ...],
+    "reasoning": "explanation of the plan"
+}"""
+
+        def planner_function(objective: str) -> Plan:
+            messages = self._format_messages(system_prompt, objective)
+            return self._call_llm(messages, Plan)
+
+        return planner_function
 
     def _create_executor(self):
-        executor_prompt = ChatPromptTemplate.from_messages(
-            [
-                (
-                    "system",
-                    """Execute the current step of the plan.
+        system_prompt = """Execute the current step of the plan.
 Available tools: {tool_names}
 Current step: {current_step}
 Plan context: {plan}
@@ -674,20 +776,35 @@ For formatting:
 - Use appropriate units
 - Round to reasonable precision
 - Use standard formats (e.g., USD for currency)
-- Maintain consistency with past formats""",
-                ),
-                ("human", "{input}"),
-            ]
-        )
+- Maintain consistency with past formats
 
-        return executor_prompt | self.llm.with_structured_output(Action)
+Return a JSON object with:
+{
+    "tool_name": "name of tool to use",
+    "tool_input": "input for the tool",
+    "thought": "reasoning for using this tool"
+}"""
+
+        def executor_function(input_data: str) -> Action:
+            formatted_prompt = system_prompt.format(
+                tool_names=", ".join(t.name for t in self.tools),
+                current_step=self.current_state["step"],
+                plan=self.current_state.get("plan", []),
+                observations=self.current_state.get("observations", []),
+                reflection=self.current_state.get("reflection", ""),
+                memory_context=self.current_state.get("memory_context", {}),
+            )
+            messages = self._format_messages(formatted_prompt, input_data)
+            return self._call_llm(messages, Action)
+
+        return executor_function
 
     def _create_task_for_agent(self, step: str, agent: BaseCrewAgent) -> Task:
         """Create a task with proper context for an agent"""
         # Get relevant memories for context
         memories = self.memory_manager.search_memories(step)
         context = "\n".join([m.get("data", "") for m in memories])
-        
+
         return Task(
             description=f"""
             Step to execute: {step}
@@ -698,68 +815,65 @@ For formatting:
             Execute this step considering the context and your expertise.
             """,
             agent=agent,
-            expected_output="Detailed results of the step execution"
+            expected_output="Detailed results of the step execution",
         )
 
     def _update_state(self, updates: Dict[str, Any]) -> None:
         """Update current state with new information"""
         self.current_state.update(updates)
-        
+
         # Store state update in memory
         self.memory_manager.add_memory(
             data=f"State update: {updates}",
             category="state",
-            metadata={"state": self.current_state}
+            metadata={"state": self.current_state},
         )
 
     def _record_experience(
-        self,
-        action: str,
-        result: Any,
-        reward: float,
-        next_state: Dict[str, Any]
+        self, action: str, result: Any, reward: float, next_state: Dict[str, Any]
     ) -> None:
         """Record an experience for learning"""
         self.memory_manager.add_experience(
             state=self.current_state,
             action=action,
             reward=reward,
-            next_state=next_state
+            next_state=next_state,
         )
-        
+
         # Update success rate
         total_experiences = len(self.memory_manager.get_recent_experiences())
         if total_experiences > 0:
-            success_rate = sum(
-                1 for exp in self.memory_manager.get_recent_experiences()
-                if exp["reward"] > 0
-            ) / total_experiences
+            success_rate = (
+                sum(
+                    1
+                    for exp in self.memory_manager.get_recent_experiences()
+                    if exp["reward"] > 0
+                )
+                / total_experiences
+            )
             self._update_state({"success_rate": success_rate})
 
     def _calculate_reward(self, result: Any) -> float:
         """Calculate reward based on action result"""
         if isinstance(result, dict) and "error" in result:
             return -0.5  # Penalty for errors
-        
+
         if isinstance(result, str):
             if "error" in result.lower():
                 return -0.3
             if "no results" in result.lower():
                 return -0.1
             return 0.1  # Small positive reward for successful completion
-            
+
         return 0.0  # Neutral reward for unclear results
 
     def _select_agent(self, step: str) -> BaseCrewAgent:
         """Select best agent for step using learned policies"""
-        state = {
-            **self.current_state,
-            "step_description": step
-        }
-        
+        state = {**self.current_state, "step_description": step}
+
         # Try to get learned policy
         policy = self.memory_manager.get_policy(state)
-        
+
         if policy and policy["confidence"] > 0.3:
             # Use policy to select agent
             weights = policy["action_weights"]
@@ -767,9 +881,9 @@ For formatting:
             return {
                 "researcher": self.researcher,
                 "calculator": self.calculator,
-                "formatter": self.formatter
+                "formatter": self.formatter,
             }.get(agent_name, self.researcher)
-        
+
         # Fallback to default selection
         if "search" in step.lower() or "find" in step.lower():
             return self.researcher
@@ -777,11 +891,10 @@ For formatting:
             return self.calculator
         if "format" in step.lower() or "present" in step.lower():
             return self.formatter
-        
+
         return self.researcher  # Default to researcher
 
     async def execution_step(self, state: AgentState):
-        """Enhanced execution step with RL integration and performance tracking"""
         plan = state.get("plan", [])
         current_step = state.get("current_step", 0)
 
@@ -790,298 +903,105 @@ For formatting:
 
         try:
             step = plan[current_step]
-            step_start_time = datetime.now()
-            
-            # Update current state
-            self._update_state({
-                "step": current_step,
-                "objective": state["messages"][-1].content if state["messages"] else ""
-            })
-            
-            # Select agent using learned policies
-            selected_agent = self._select_agent(step)
-            
-            # Create and execute task
-            task = self._create_task_for_agent(step, selected_agent)
-            self.crew.tasks = [task]
-            result = self.crew.kickoff()
-            
-            # Calculate execution time and resource usage
-            execution_time = (datetime.now() - step_start_time).total_seconds()
-            resource_usage = {
-                "memory": len(str(state)) / 1024,  # Rough memory estimate in KB
-                "steps": current_step + 1,
-                "complexity": len(str(result)) / 1024  # Result complexity estimate
-            }
-            
-            # Track performance metrics
-            self.memory_manager.track_performance(
-                "execution_times",
-                execution_time,
-                {"step": current_step, "agent": selected_agent.role}
-            )
-            
-            self.memory_manager.track_performance(
-                "resource_usage",
-                sum(resource_usage.values()),
-                {"step": current_step, "details": resource_usage}
-            )
-            
-            # Calculate reward and record experience
-            reward = self._calculate_reward(result)
-            next_state = {
-                **self.current_state,
-                "step": current_step + 1,
-                "last_action": step,
-                "last_result": result
-            }
-            
-            # Record experience with performance data
-            self._record_experience(
-                action=selected_agent.role.lower(),
-                result=result,
-                reward=reward,
-                next_state=next_state
-            )
-            
-            # Update strategy performance
-            strategy_id = f"{selected_agent.role}_{current_step}"
-            self.memory_manager.update_strategy_performance(
-                strategy_id=strategy_id,
-                success=reward > 0,
-                execution_time=execution_time,
-                resource_usage=resource_usage
-            )
-            
-            # Track success rate
-            self.memory_manager.track_performance(
-                "success_rate",
-                1.0 if reward > 0 else 0.0,
-                {"step": current_step, "agent": selected_agent.role}
-            )
-            
-            # Track reward
-            self.memory_manager.track_performance(
-                "reward_history",
-                reward,
-                {"step": current_step, "agent": selected_agent.role}
-            )
-            
-            # Learn from recent experiences
-            if current_step > 0 and current_step % 3 == 0:  # Learn every 3 steps
-                self.memory_manager.learn_from_experiences()
-                # Also optimize strategies periodically
-                self.memory_manager.optimize_strategies()
 
-            return {
-                "observations": [{"action": step, "result": result}],
-                "current_step": current_step + 1,
-                "context": {
-                    **state.get("context", {}),
-                    f"step_{current_step}": result,
-                    "performance": self.memory_manager.get_performance_summary()
-                },
-                "result": str(result)
-            }
-
-        except Exception as e:
-            error_msg = f"Error in execution: {str(e)}"
-            print(f"Execution error details: {str(e)}")
-            
-            # Track error in performance metrics
-            self.memory_manager.track_performance(
-                "errors",
-                0.0,  # Zero score for errors
-                {
-                    "step": current_step,
-                    "error": str(e),
-                    "type": "execution_error"
-                }
-            )
-            
-            # Record error experience
-            self._record_experience(
-                action="error",
-                result=error_msg,
-                reward=-1.0,
-                next_state=self.current_state
-            )
-            
-            return {
-                "messages": [AIMessage(content=error_msg)],
-                "current_step": current_step + 1,
-                "context": {
-                    **state.get("context", {}),
-                    "error": error_msg,
-                    "performance": self.memory_manager.get_performance_summary()
-                }
-            }
-
-    def _build_graph(self):
-        workflow = StateGraph(AgentState)
-
-        # Planning node with Mem0 integration
-        async def planning_step(state: AgentState):
             # Get relevant memories for context
-            memories = self.memory_manager.get_session_memories()
-            memory_context = "\n".join([m.get("data", "") for m in memories])
-            
-            # Create plan using standard LLM
-            plan_response = self.llm.invoke(
-                f"""Create a detailed plan to accomplish the objective.
-Consider past experiences:
-{memory_context}
+            memories = self.memory_manager.search_memories(step)
+            context = "\n".join([m.get("data", "") for m in memories])
 
-Break down into clear, actionable steps.
-
-Objective: {state["messages"][-1].content}"""
-            ).content
-            
-            # Parse plan from response
-            steps = [
-                step.strip() 
-                for step in plan_response.split("\n") 
-                if step.strip() and not step.startswith(("#", "-"))
-            ]
-            
-            # Store the plan in memory
-            self.memory_manager.add_memory(
-                f"Created plan: {steps}",
-                category="strategy",
-                metadata={"type": "plan", "step": "planning"}
-            )
-            
-            return {
-                "planning_step": {"plan": steps},
-                "current_step": 0,
-                "plan": steps,
-            }
-
-        # Execution node with memory integration
-        async def execution_step(state: AgentState):
-            plan = state.get("plan", [])
-            current_step = state.get("current_step", 0)
-
-            if not plan or current_step >= len(plan):
-                return {"messages": [AIMessage(content="Plan completed")]}
-
-            try:
-                step = plan[current_step]
-                
-                # Get relevant memories for context
-                memories = self.memory_manager.search_memories(step)
-                context = "\n".join([m.get("data", "") for m in memories])
-                
-                # Use standard LLM for agent selection
-                agent_selection = self.llm.invoke(
-                    f"""Based on the step and context, select the best agent:
-Step: {step}
-Context: {context}
-
+            # Use direct OpenAI call for agent selection
+            messages = [
+                {
+                    "role": "system",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": """Based on the step and context, select the best agent.
 Available agents:
 - Researcher (search and analysis)
 - Calculator (numerical computations)
 - Formatter (data presentation)
 
-Return only the agent name."""
-                ).content.strip().lower()
-                
-                primary_agent = {
-                    "researcher": self.researcher,
-                    "calculator": self.calculator,
-                    "formatter": self.formatter
-                }.get(agent_selection, self.researcher)
+Return only the agent name in lowercase.""",
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"""Step: {step}
+Context: {context}""",
+                        }
+                    ],
+                },
+            ]
 
-                # Create and execute task
-                task = self._create_task_for_agent(step, primary_agent)
-                
-                # Update crew's tasks and execute
-                self.crew = Crew(
-                    agents=[self.planner, self.researcher, self.calculator, self.formatter],
-                    tasks=[task],
-                    process=Process.sequential,
-                    verbose=True
-                )
-                result = self.crew.kickoff()
+            agent_selection = self._call_llm(messages).strip().lower()
 
-                # Store result in memory
-                self.memory_manager.add_memory(
-                    str(result),
-                    category="action",
-                    metadata={
-                        "step": current_step,
-                        "agent": primary_agent.role,
-                        "task": step,
-                        "context_used": context
-                    }
-                )
+            primary_agent = {
+                "researcher": self.researcher,
+                "calculator": self.calculator,
+                "formatter": self.formatter,
+            }.get(agent_selection, self.researcher)
 
-                return {
-                    "observations": [{"action": step, "result": result}],
-                    "current_step": current_step + 1,
-                    "context": {
-                        **state.get("context", {}),
-                        f"step_{current_step}": result
-                    },
-                    "result": str(result),
-                    "memory_context": {
-                        "step": current_step,
-                        "agent": primary_agent.role
-                    }
-                }
+            # Create and execute task
+            task = self._create_task_for_agent(step, primary_agent)
 
-            except Exception as e:
-                error_msg = f"Error in execution: {str(e)}"
-                print(f"Execution error details: {str(e)}")
-                
-                self.memory_manager.add_memory(
-                    error_msg,
-                    category="action",
-                    metadata={
-                        "type": "error",
-                        "step": current_step
-                    }
-                )
-                
-                return {
-                    "messages": [AIMessage(content=error_msg)],
-                    "current_step": current_step + 1,
-                    "context": state.get("context", {}),
-                    "result": error_msg,
-                    "memory_context": state.get("memory_context", {})
-                }
+            # Update crew's tasks and execute
+            self.crew = Crew(
+                agents=[self.planner, self.researcher, self.calculator, self.formatter],
+                tasks=[task],
+                process=Process.sequential,
+                verbose=True,
+            )
+            result = self.crew.kickoff()
 
-        # Reflection node with memory integration
-        async def reflection_step(state: AgentState):
-            if "observations" in state and state["observations"]:
-                memories = self.memory_manager.get_session_memories()
-                memory_context = "\n".join([m.get("data", "") for m in memories])
-                
-                reflection = self.llm.invoke(
-                    f"""Analyze the execution and provide insights.
-Observations: {state['observations']}
-Memory Context: {memory_context}
+            # Store result in memory
+            self.memory_manager.add_memory(
+                str(result),
+                category="action",
+                metadata={
+                    "step": current_step,
+                    "agent": primary_agent.role,
+                    "task": step,
+                    "context_used": context,
+                },
+            )
 
-Consider:
-1. Effectiveness of actions
-2. Learning points
-3. Potential improvements"""
-                ).content
-                
-                self.memory_manager.add_memory(
-                    reflection,
-                    category="strategy",
-                    metadata={"type": "reflection"}
-                )
-                
-                return {"reflection": reflection}
-                
-            return {}
+            return {
+                "observations": [{"action": step, "result": result}],
+                "current_step": current_step + 1,
+                "context": {**state.get("context", {}), f"step_{current_step}": result},
+                "result": str(result),
+                "memory_context": {"step": current_step, "agent": primary_agent.role},
+            }
 
-        # Add nodes
-        workflow.add_node("planning_step", planning_step)
-        workflow.add_node("execution_step", execution_step)
-        workflow.add_node("reflection_step", reflection_step)
+        except Exception as e:
+            error_msg = f"Error in execution: {str(e)}"
+            print(f"Execution error details: {str(e)}")
+
+            self.memory_manager.add_memory(
+                error_msg,
+                category="action",
+                metadata={"type": "error", "step": current_step},
+            )
+
+            return {
+                "messages": [AIMessage(content=error_msg)],
+                "current_step": current_step + 1,
+                "context": state.get("context", {}),
+                "result": error_msg,
+                "memory_context": state.get("memory_context", {}),
+            }
+
+    def _build_graph(self):
+        workflow = StateGraph(AgentState)
+
+        # Add nodes with proper async handling
+        workflow.add_node("planning_step", self.planning_step)
+        workflow.add_node("execution_step", self.execution_step)
+        workflow.add_node("reflection_step", self.reflection_step)
 
         # Add edges
         workflow.add_edge(START, "planning_step")
@@ -1126,7 +1046,9 @@ Consider:
         try:
             async for state in self.graph.astream(initial_state):
                 # Print plan when available
-                if "planning_step" in state and isinstance(state["planning_step"], dict):
+                if "planning_step" in state and isinstance(
+                    state["planning_step"], dict
+                ):
                     plan = state["planning_step"].get("plan", [])
                     if plan:
                         console.print("\n")
@@ -1138,41 +1060,228 @@ Consider:
                     latest_observation = state["observations"][-1]
                     if "result" in latest_observation:
                         final_result = latest_observation["result"]
-                        if isinstance(final_result, dict) and "Final Answer" in final_result:
+                        if (
+                            isinstance(final_result, dict)
+                            and "Final Answer" in final_result
+                        ):
                             final_result = final_result["Final Answer"]
                         console.print("\n")
-                        console.print(format_step_output(
-                            state.get("current_step", 0),
-                            latest_observation.get("action", "Processing"),
-                            final_result
-                        ))
+                        console.print(
+                            format_step_output(
+                                state.get("current_step", 0),
+                                latest_observation.get("action", "Processing"),
+                                final_result,
+                            )
+                        )
                         console.print("\n")
 
                 # Handle reflection
                 if "reflection" in state:
                     reflection = state.get("reflection", "")
                     if reflection:
-                        if isinstance(reflection, (AIMessage, HumanMessage, SystemMessage)):
+                        if isinstance(
+                            reflection, (AIMessage, HumanMessage, SystemMessage)
+                        ):
                             reflection = reflection.content
                         console.print("\n")
                         console.print(format_reflection(reflection))
                         console.print("\n")
 
-            # Return the final result if we have one
+            # Format final result using structured output
             if final_result:
-                return final_result
-            
+                messages = [
+                    {
+                        "role": "system",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": """Format the final answer in a structured way.
+The answer should be clear and concise.
+If there was an error or the execution wasn't successful, set success to false.
+
+You must respond in JSON format with the following structure:
+{
+    "content": "the actual content of the final answer",
+    "is_final": true,
+    "success": true/false
+}""",
+                            }
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": str(final_result)}],
+                    },
+                ]
+
+                formatted_result = self._call_llm(messages, FinalAnswer)
+                return formatted_result
+
             # If no final result but we have observations, return the last result
             if "observations" in state and state["observations"]:
                 last_observation = state["observations"][-1]
                 if "result" in last_observation:
                     result = last_observation["result"]
                     if isinstance(result, dict) and "Final Answer" in result:
-                        return result["Final Answer"]
-                    return str(result)
+                        result = result["Final Answer"]
+                    messages = [
+                        {
+                            "role": "system",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": """Format the final answer in a structured way.
+The answer should be clear and concise.
+If there was an error or the execution wasn't successful, set success to false.
 
-            return "No result was produced"
+You must respond in JSON format with the following structure:
+{
+    "content": "the actual content of the final answer",
+    "is_final": true,
+    "success": true/false
+}""",
+                                }
+                            ],
+                        },
+                        {
+                            "role": "user",
+                            "content": [{"type": "text", "text": str(result)}],
+                        },
+                    ]
+                    return self._call_llm(messages, FinalAnswer)
+
+            return FinalAnswer(
+                content="No result was produced", success=False, is_final=True
+            )
 
         except Exception as e:
             print(f"Runtime error: {str(e)}")  # Debug print
-            return f"Error during execution: {str(e)}"
+            return FinalAnswer(
+                content=f"Error during execution: {str(e)}",
+                success=False,
+                is_final=True,
+            )
+
+    async def planning_step(self, state: AgentState):
+        """Planning step that creates a structured plan based on the objective."""
+        try:
+            # Get relevant memories for context
+            memories = self.memory_manager.get_session_memories()
+            memory_context = "\n".join([m.get("data", "") for m in memories])
+
+            # Create plan using direct OpenAI call
+            messages = [
+                {
+                    "role": "system",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"""Create a detailed plan to accomplish the objective.
+Consider past experiences:
+{memory_context}
+
+Break down into clear, actionable steps.
+Provide reasoning for the plan structure.
+Estimate the number of steps needed.
+
+You must respond in JSON format with the following structure:
+{{
+    "steps": ["step1", "step2", ...],
+    "reasoning": "explanation of the plan",
+    "estimated_steps": number
+}}""",
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": state["messages"][-1].content}],
+                },
+            ]
+
+            plan_response = self._call_llm(messages, Plan)
+
+            # Store the plan in memory
+            self.memory_manager.add_memory(
+                f"Created plan: {plan_response.steps}\nReasoning: {plan_response.reasoning}",
+                category="strategy",
+                metadata={"type": "plan", "step": "planning"},
+            )
+
+            return {
+                "planning_step": {"plan": plan_response.steps},
+                "current_step": 0,
+                "plan": plan_response.steps,
+            }
+        except Exception as e:
+            print(f"Planning error: {str(e)}")
+            return {"planning_step": {"plan": []}, "current_step": 0, "plan": []}
+
+    async def reflection_step(self, state: AgentState):
+        """Reflection step that analyzes execution and provides insights."""
+        try:
+            if "observations" in state and state["observations"]:
+                memories = self.memory_manager.get_session_memories()
+                memory_context = "\n".join([m.get("data", "") for m in memories])
+
+                messages = [
+                    {
+                        "role": "system",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": """Analyze the execution and provide insights.
+Consider:
+1. Effectiveness of actions
+2. Learning points
+3. Potential improvements
+
+You must respond in JSON format with a structured analysis.""",
+                            }
+                        ],
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": f"""Observations: {state['observations']}
+Memory Context: {memory_context}""",
+                            }
+                        ],
+                    },
+                ]
+
+                reflection = self._call_llm(messages)
+
+                self.memory_manager.add_memory(
+                    reflection, 
+                    category="strategy", 
+                    metadata={"type": "reflection"}
+                )
+
+                return {"reflection": reflection}
+
+            return {}
+        except Exception as e:
+            print(f"Reflection error: {str(e)}")
+            return {}
+
+
+class FinalAnswer(BaseModel):
+    """Final answer model for structured output"""
+
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        json_schema_extra={
+            "type": "object",
+            "required": ["content", "is_final", "success"],
+            "additionalProperties": False,
+        },
+    )
+
+    content: str = Field(description="The actual content of the final answer")
+    is_final: bool = Field(description="Whether this is the final answer", default=True)
+    success: bool = Field(
+        description="Whether the execution was successful", default=True
+    )

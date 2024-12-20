@@ -4,7 +4,11 @@ from memory_manager import MemoryManager
 from datetime import datetime
 from langchain.tools import Tool
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
+from openai import OpenAI
 import os
+
+# Initialize OpenAI client
+client = OpenAI()
 
 class BaseCrewAgent(Agent):
     """Base agent with memory capabilities"""
@@ -31,6 +35,19 @@ class BaseCrewAgent(Agent):
             }
         )
 
+    def _call_llm(self, messages: List[Dict[str, str]]) -> str:
+        """Helper method to call OpenAI API"""
+        try:
+            completion = client.chat.completions.create(
+                model="gpt-4-turbo-preview",
+                messages=messages,
+                temperature=float(os.getenv("AGENT_TEMPERATURE", 0.7))
+            )
+            return completion.choices[0].message.content
+        except Exception as e:
+            print(f"Error calling OpenAI API: {str(e)}")
+            raise e
+
 class PlannerAgent(BaseCrewAgent):
     def __init__(self, memory_manager: MemoryManager):
         super().__init__(
@@ -49,18 +66,28 @@ class PlannerAgent(BaseCrewAgent):
             for p in past_plans
         ])
         
-        prompt = f"""
-        Objective: {objective}
+        messages = [
+            {
+                "role": "system",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"""Create a detailed step-by-step plan to achieve this objective.
+Each step should be clear and actionable.
+Consider past experiences when creating this plan.
+
+Past related plans:
+{past_plan_data}
+
+Objective: {objective}
+
+Return the steps as a numbered list."""
+                    }
+                ]
+            }
+        ]
         
-        Past related plans:
-        {past_plan_data}
-        
-        Create a detailed step-by-step plan to achieve this objective.
-        Each step should be clear and actionable.
-        Consider past experiences when creating this plan.
-        """
-        
-        response = self.llm.predict(prompt)
+        response = self._call_llm(messages)
         
         steps = [
             step.strip() 
