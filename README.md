@@ -1,4 +1,4 @@
-# Agenta: Advanced AI Agent System 🤖
+# Agenta: Advanced AI Agent System
 
 [![Python Version](https://img.shields.io/badge/python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
 [![OpenAI](https://img.shields.io/badge/OpenAI-API-green.svg)](https://openai.com/)
@@ -6,7 +6,7 @@
 
 A sophisticated multi-agent AI system powered by reinforcement learning and GPT-4, designed for complex task execution and continuous learning.
 
-## 🌟 Key Features
+## Key Features
 
 - **Multi-Agent Architecture**
 
@@ -29,7 +29,7 @@ A sophisticated multi-agent AI system powered by reinforcement learning and GPT-
   - Automated Policy Refinement
   - Resource Usage Optimization
 
-## 🚀 Quick Start
+## Quick Start
 
 1. **Setup Environment**
 
@@ -99,7 +99,7 @@ agenta/
 | MAX_ITERATIONS    | 5                   | Maximum steps per objective            |
 | MODEL             | gpt-4-turbo-preview | Language model used                    |
 
-## 📚 Advanced Features
+## Advanced Features
 
 ### Memory Management
 
@@ -115,23 +115,7 @@ agenta/
 - Dynamic agent selection and handoff
 - Continuous learning from experiences
 
-## 🤝 Contributing
-
-Contributions are welcome! Please check our [Contributing Guidelines](CONTRIBUTING.md) for details.
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🔗 Links
-
-- [Documentation](docs/)
-- [Issue Tracker](issues/)
-- [Change Log](CHANGELOG.md)
-
----
-
-Built with ⚡ using OpenAI, Exa AI, and Mem0
+Built using OpenAI, Exa AI, and Mem0
 
 ### TODO
 
